@@ -18,7 +18,7 @@ Usage:
   python deepseek.py <addon_path> --output-path <output_dir> [--verbose]
 
 Example:
-  python deepseek.py "C:/some/addon" ^
+  python ARCGen.py "C:/some/addon" ^
     --output-path "C:/some/rewritten_addon" ^
     --verbose
 """
