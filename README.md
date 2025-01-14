@@ -1,6 +1,6 @@
-# Automated-Reverse-Code-Generation-ARCGenV1
+# Automated-Code-Generation-ACGenV1
 
-Automated Reverse Code Generation (ARCGen)
+Automated Reverse Code Generation (ACGen)
 ARCGen is a Python-based script powered by DeepSeek API, designed to analyze and optimize Garry's Mod addons. It generates a cleaner, more efficient version of existing addons, maintaining their original style while improving performance. Perfect for developers looking to save time and streamline large, complex projects.
 If you make another version from this script give me credit for the original version
 Key Features:
