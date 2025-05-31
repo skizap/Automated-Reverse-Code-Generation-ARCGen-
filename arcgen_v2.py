@@ -3,9 +3,6 @@
 ARCGen V2 - Enhanced Automated Reverse Code Generation with Intelligent Scaling
 ===============================================================================
 
-[ETHICAL DISCLAIMER]
-This tool is for authorized testing only. Misuse is prohibited.
-
 Advanced AI-powered code optimization and rewriting tool with support for multiple
 AI providers, smart chunking, comprehensive configuration, enterprise features,
 and intelligent scaling for rate limiting and memory management.
@@ -162,7 +159,14 @@ class ConfigManager:
                 'primary_provider': 'deepseek',
                 'deepseek': {
                     'base_url': 'https://api.deepseek.com',
-                    'model': 'deepseek-coder',
+                    'model': 'deepseek-chat',  # Updated to latest V3-0324
+                    'max_tokens': 8000,
+                    'temperature': 0.7,
+                    'top_p': 1.0
+                },
+                'deepseek_reasoner': {
+                    'base_url': 'https://api.deepseek.com',
+                    'model': 'deepseek-reasoner',  # R1-0528 for enhanced reasoning
                     'max_tokens': 8000,
                     'temperature': 0.7,
                     'top_p': 1.0
@@ -353,9 +357,16 @@ class DeepSeekProvider(AIProvider):
             'Content-Type': 'application/json'
         }
         
+        # Add system message for better context
+        system_message = kwargs.get('system_message', 
+            'You are an expert code optimization assistant. Analyze and improve code while preserving functionality.')
+        
         data = {
             'model': self.config.model,
-            'messages': [{'role': 'user', 'content': prompt}],
+            'messages': [
+                {'role': 'system', 'content': system_message},
+                {'role': 'user', 'content': prompt}
+            ],
             'max_tokens': kwargs.get('max_tokens', self.config.max_tokens),
             'temperature': kwargs.get('temperature', self.config.temperature),
             'top_p': kwargs.get('top_p', self.config.top_p),
@@ -384,8 +395,8 @@ class DeepSeekProvider(AIProvider):
     def validate_api_key(self) -> bool:
         """Validate DeepSeek API key"""
         try:
-            # Make a simple test request
-            self.generate("Hello", max_tokens=1)
+            # Make a simple test request with minimal tokens
+            self.generate("Hello", max_tokens=1, system_message="You are a helpful assistant.")
             return True
         except Exception:
             return False

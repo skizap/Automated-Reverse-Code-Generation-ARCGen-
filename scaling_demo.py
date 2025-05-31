@@ -3,9 +3,6 @@
 ARCGen V2 Intelligent Scaling Demonstration
 ===========================================
 
-[ETHICAL DISCLAIMER]
-This tool is for authorized testing only. Misuse is prohibited.
-
 This script demonstrates the intelligent scaling capabilities of ARCGen V2,
 showing how it adapts to rate limiting and memory pressure scenarios.
 

@@ -74,12 +74,21 @@ Required packages:
    # Customize as needed
    ```
 
+5. **Test API integration**:
+   ```bash
+   python test_deepseek_api.py
+   ```
+
 ### API Key Setup
 
 #### DeepSeek API
 1. Sign up at [DeepSeek Platform](https://platform.deepseek.com)
-2. Generate an API key
+2. Generate an API key from [API Keys page](https://platform.deepseek.com/api_keys)
 3. Add to `.env`: `DEEPSEEK_API_KEY=your_key_here`
+
+**Available Models:**
+- `deepseek-chat`: Latest V3-0324 model (recommended for code optimization)
+- `deepseek-reasoner`: R1-0528 model (for complex reasoning tasks)
 
 #### OpenAI API (Optional)
 1. Sign up at [OpenAI Platform](https://platform.openai.com)
