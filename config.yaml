@@ -1,0 +1,184 @@
+# ARCGen Configuration File
+# This file contains all configuration options for the Automated Reverse Code Generation tool
+
+# API Configuration
+api:
+  # Primary provider (deepseek, openai, claude)
+  primary_provider: "deepseek"
+  
+  # DeepSeek Configuration
+  deepseek:
+    base_url: "https://api.deepseek.com"
+    model: "deepseek-coder"
+    max_tokens: 8000
+    temperature: 0.7
+    top_p: 1.0
+    
+  # OpenAI Configuration (optional)
+  openai:
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4"
+    max_tokens: 8000
+    temperature: 0.7
+    
+  # Rate limiting
+  rate_limit:
+    requests_per_minute: 60
+    concurrent_requests: 4
+
+# Processing Configuration
+processing:
+  # Chunk size for splitting large files (characters)
+  chunk_size: 3000
+  
+  # Smart chunking (preserves function/class boundaries)
+  smart_chunking: true
+  
+  # Maximum file size to process (MB)
+  max_file_size: 10
+  
+  # File extensions to process
+  text_extensions:
+    - ".lua"
+    - ".txt"
+    - ".cfg"
+    - ".json"
+    - ".vmt"
+    - ".vmf"
+    - ".js"
+    - ".py"
+    - ".cpp"
+    - ".h"
+    - ".hpp"
+    - ".c"
+    - ".cs"
+    - ".php"
+    - ".html"
+    - ".css"
+    - ".xml"
+    - ".sql"
+    - ".sh"
+    - ".bat"
+    - ".ps1"
+  
+  # Binary extensions to copy without processing
+  binary_extensions:
+    - ".vtf"
+    - ".vvd"
+    - ".mdl"
+    - ".phy"
+    - ".dx80.vtx"
+    - ".dx90.vtx"
+    - ".sw.vtx"
+    - ".wav"
+    - ".mp3"
+    - ".ogg"
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".gif"
+    - ".bmp"
+    - ".tga"
+    - ".exe"
+    - ".dll"
+    - ".so"
+    - ".dylib"
+
+# Optimization Profiles
+optimization_profiles:
+  # Conservative - minimal changes, focus on readability
+  conservative:
+    preserve_comments: true
+    preserve_formatting: true
+    optimize_performance: false
+    add_documentation: true
+    
+  # Balanced - moderate optimization with safety
+  balanced:
+    preserve_comments: true
+    preserve_formatting: false
+    optimize_performance: true
+    add_documentation: true
+    remove_dead_code: true
+    
+  # Aggressive - maximum optimization
+  aggressive:
+    preserve_comments: false
+    preserve_formatting: false
+    optimize_performance: true
+    add_documentation: false
+    remove_dead_code: true
+    refactor_functions: true
+
+# Backup Configuration
+backup:
+  # Create backups before processing
+  enabled: true
+  
+  # Backup directory name
+  backup_dir: "backup"
+  
+  # Compress backups
+  compress: true
+  
+  # Keep backup for X days (0 = forever)
+  retention_days: 30
+
+# Logging Configuration
+logging:
+  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  level: "INFO"
+  
+  # Log to file
+  log_to_file: true
+  
+  # Log file path
+  log_file: "arcgen.log"
+  
+  # Rotate logs
+  rotate_logs: true
+  
+  # Max log file size (MB)
+  max_log_size: 10
+  
+  # Number of backup log files
+  backup_count: 5
+
+# Output Configuration
+output:
+  # Default output suffix
+  output_suffix: "_optimized"
+  
+  # Generate analysis report
+  generate_report: true
+  
+  # Report format (json, html, markdown)
+  report_format: "html"
+  
+  # Include statistics
+  include_stats: true
+
+# Security Configuration
+security:
+  # Validate file paths to prevent directory traversal
+  validate_paths: true
+  
+  # Maximum processing time per file (seconds)
+  max_processing_time: 300
+  
+  # Scan for potentially malicious code patterns
+  security_scan: true
+
+# Performance Configuration
+performance:
+  # Enable caching of API responses
+  enable_caching: true
+  
+  # Cache directory
+  cache_dir: ".arcgen_cache"
+  
+  # Cache expiration (hours)
+  cache_expiration: 24
+  
+  # Memory limit for processing (MB)
+  memory_limit: 1024 
