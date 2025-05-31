@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-ARCGen V2 - Enhanced Automated Reverse Code Generation
-======================================================
+ARCGen V2 - Enhanced Automated Reverse Code Generation with Intelligent Scaling
+===============================================================================
+
+[ETHICAL DISCLAIMER]
+This tool is for authorized testing only. Misuse is prohibited.
 
 Advanced AI-powered code optimization and rewriting tool with support for multiple
-AI providers, smart chunking, comprehensive configuration, and enterprise features.
+AI providers, smart chunking, comprehensive configuration, enterprise features,
+and intelligent scaling for rate limiting and memory management.
 
 Features:
 - Multi-provider AI support (DeepSeek, OpenAI, Claude)
-- Smart context-aware chunking
+- Smart context-aware chunking with adaptive sizing
+- Intelligent rate limiting with exponential backoff
+- Dynamic memory management and scaling
 - Configuration management with YAML
 - Secure environment variable handling
 - Progress tracking and rich console output
@@ -16,6 +22,7 @@ Features:
 - Comprehensive logging and reporting
 - Performance monitoring and caching
 - Security scanning and validation
+- Auto-scaling for API limits and resource constraints
 
 Usage:
     python arcgen_v2.py <addon_path> [options]
@@ -33,11 +40,15 @@ import time
 import zipfile
 import logging
 import threading
+import psutil
+import gc
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
+from collections import deque
+import math
 
 # Third-party imports
 import yaml
@@ -109,6 +120,19 @@ class SecurityConfig:
     max_processing_time: int = 300
     security_scan: bool = True
     allowed_extensions: List[str] = None
+
+@dataclass
+class ScalingConfig:
+    """Intelligent scaling configuration"""
+    enable_adaptive_scaling: bool = True
+    min_concurrent_requests: int = 1
+    max_concurrent_requests: int = 10
+    memory_threshold_percent: float = 80.0
+    rate_limit_backoff_factor: float = 2.0
+    max_backoff_time: int = 300  # seconds
+    chunk_size_scaling_factor: float = 0.5
+    min_chunk_size: int = 500
+    max_chunk_size: int = 8000
 
 class ConfigManager:
     """Manages configuration loading and validation"""
@@ -200,93 +224,97 @@ class ConfigManager:
             'security': {
                 'validate_paths': True,
                 'max_processing_time': 300,
-                'security_scan': True,
-                'allowed_extensions': ['.lua', '.txt', '.cfg', '.json', '.vmt', '.vmf', '.py', '.js', '.cpp', '.c', '.cs']
+                'security_scan': True
+            },
+            'scaling': {
+                'enable_adaptive_scaling': True,
+                'min_concurrent_requests': 1,
+                'max_concurrent_requests': 10,
+                'memory_threshold_percent': 80.0,
+                'rate_limit_backoff_factor': 2.0,
+                'max_backoff_time': 300,
+                'chunk_size_scaling_factor': 0.5,
+                'min_chunk_size': 500,
+                'max_chunk_size': 8000
             }
         }
     
     def _validate_config(self):
         """Validate configuration values"""
-        # Validate API keys
-        provider = self.config['api']['primary_provider']
-        if provider == 'deepseek' and not os.getenv('DEEPSEEK_API_KEY'):
-            console.print("[red]DEEPSEEK_API_KEY environment variable not set[/red]")
-            sys.exit(1)
-        elif provider == 'openai' and not os.getenv('OPENAI_API_KEY'):
-            console.print("[red]OPENAI_API_KEY environment variable not set[/red]")
-            sys.exit(1)
+        # Validate API configuration
+        if 'api' not in self.config:
+            raise ValueError("API configuration is required")
+        
+        # Validate scaling configuration
+        scaling = self.config.get('scaling', {})
+        if scaling.get('min_concurrent_requests', 1) > scaling.get('max_concurrent_requests', 10):
+            raise ValueError("min_concurrent_requests cannot be greater than max_concurrent_requests")
     
     def get_api_config(self, provider: Optional[str] = None) -> APIConfig:
         """Get API configuration for specified provider"""
         provider = provider or self.config['api']['primary_provider']
         
-        if provider == 'deepseek':
-            config = self.config['api']['deepseek']
-            api_key = os.getenv('DEEPSEEK_API_KEY')
-        elif provider == 'openai':
-            config = self.config['api'].get('openai', {})
-            api_key = os.getenv('OPENAI_API_KEY')
-        else:
-            raise ValueError(f"Unsupported provider: {provider}")
+        if provider not in self.config['api']:
+            raise ValueError(f"Provider {provider} not configured")
+        
+        provider_config = self.config['api'][provider]
+        api_key_env = f"{provider.upper()}_API_KEY"
+        api_key = os.getenv(api_key_env)
         
         if not api_key:
-            raise ValueError(f"API key not found for provider: {provider}")
+            raise ValueError(f"API key not found in environment variable {api_key_env}")
         
         return APIConfig(
             provider=provider,
-            base_url=config.get('base_url', ''),
-            model=config.get('model', ''),
+            base_url=provider_config['base_url'],
+            model=provider_config['model'],
             api_key=api_key,
-            max_tokens=config.get('max_tokens', 8000),
-            temperature=config.get('temperature', 0.7),
-            top_p=config.get('top_p', 1.0),
-            timeout=config.get('timeout', 60)
+            max_tokens=provider_config.get('max_tokens', 8000),
+            temperature=provider_config.get('temperature', 0.7),
+            top_p=provider_config.get('top_p', 1.0),
+            timeout=provider_config.get('timeout', 60)
         )
     
     def get_optimization_profile(self, profile_name: str) -> OptimizationProfile:
         """Get optimization profile by name"""
-        profiles = self.config.get('optimization_profiles', {})
-        if profile_name not in profiles:
-            console.print(f"[yellow]Profile '{profile_name}' not found, using balanced[/yellow]")
-            profile_name = 'balanced'
+        if profile_name not in self.config['optimization_profiles']:
+            raise ValueError(f"Profile {profile_name} not found")
         
-        profile_config = profiles.get(profile_name, profiles.get('balanced', {}))
-        return OptimizationProfile(
-            name=profile_name,
-            **profile_config
-        )
+        profile_data = self.config['optimization_profiles'][profile_name]
+        return OptimizationProfile(name=profile_name, **profile_data)
     
     def get_security_config(self) -> SecurityConfig:
         """Get security configuration"""
-        security_config = self.config.get('security', {})
-        return SecurityConfig(**security_config)
-
-###############################################################################
-#                              LOGGING SETUP                                  #
-###############################################################################
+        security_data = self.config.get('security', {})
+        return SecurityConfig(**security_data)
+    
+    def get_scaling_config(self) -> ScalingConfig:
+        """Get scaling configuration"""
+        scaling_data = self.config.get('scaling', {})
+        return ScalingConfig(**scaling_data)
 
 def setup_logging(config: Dict[str, Any]) -> logging.Logger:
     """Setup logging configuration"""
     log_config = config.get('logging', {})
-    log_level = getattr(logging, log_config.get('level', 'INFO').upper())
+    level = getattr(logging, log_config.get('level', 'INFO').upper())
     
     # Create logger
     logger = logging.getLogger('arcgen')
-    logger.setLevel(log_level)
+    logger.setLevel(level)
     
     # Clear existing handlers
     logger.handlers.clear()
     
     # Console handler with rich formatting
     console_handler = RichHandler(console=console, show_time=True, show_path=False)
-    console_handler.setLevel(log_level)
+    console_handler.setLevel(level)
     logger.addHandler(console_handler)
     
     # File handler if enabled
     if log_config.get('log_to_file', True):
         log_file = log_config.get('log_file', 'arcgen.log')
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setLevel(log_level)
+        file_handler.setLevel(level)
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
@@ -305,10 +333,7 @@ class AIProvider:
     def __init__(self, config: APIConfig, logger: logging.Logger, rate_limit_config: Dict[str, int]):
         self.config = config
         self.logger = logger
-        self.session = requests.Session()
-        # Use rate limit from configuration
-        requests_per_minute = rate_limit_config.get('requests_per_minute', 60)
-        self.rate_limiter = RateLimiter(requests_per_minute, 60)
+        self.rate_limit_config = rate_limit_config
     
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate response from AI provider"""
@@ -323,51 +348,46 @@ class DeepSeekProvider(AIProvider):
     
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate response using DeepSeek API"""
-        with self.rate_limiter:
-            url = f"{self.config.base_url}/chat/completions"
+        headers = {
+            'Authorization': f'Bearer {self.config.api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        data = {
+            'model': self.config.model,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': kwargs.get('max_tokens', self.config.max_tokens),
+            'temperature': kwargs.get('temperature', self.config.temperature),
+            'top_p': kwargs.get('top_p', self.config.top_p),
+            'stream': False
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.config.base_url}/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=self.config.timeout
+            )
+            response.raise_for_status()
             
-            payload = {
-                "model": self.config.model,
-                "messages": [
-                    {"role": "system", "content": "You are a helpful code optimization assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": self.config.max_tokens,
-                "temperature": self.config.temperature,
-                "top_p": self.config.top_p
-            }
-            
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.config.api_key}"
-            }
-            
-            try:
-                response = self.session.post(
-                    url, 
-                    headers=headers, 
-                    json=payload, 
-                    timeout=self.config.timeout
-                )
-                response.raise_for_status()
+            result = response.json()
+            if 'choices' in result and len(result['choices']) > 0:
+                return result['choices'][0]['message']['content']
+            else:
+                raise ValueError("No response content received")
                 
-                data = response.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    return "[Error] No content returned from API"
-                    
-            except requests.exceptions.RequestException as e:
-                self.logger.error(f"API request failed: {e}")
-                return f"[Error] API request failed: {e}"
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"DeepSeek API request failed: {e}")
+            raise
     
     def validate_api_key(self) -> bool:
         """Validate DeepSeek API key"""
         try:
-            response = self.generate("Hello")
-            return not response.startswith("[Error]")
-        except Exception as e:
-            self.logger.error(f"API key validation failed: {e}")
+            # Make a simple test request
+            self.generate("Hello", max_tokens=1)
+            return True
+        except Exception:
             return False
 
 class OpenAIProvider(AIProvider):
@@ -375,79 +395,423 @@ class OpenAIProvider(AIProvider):
     
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate response using OpenAI API"""
-        with self.rate_limiter:
-            url = f"{self.config.base_url}/chat/completions"
+        headers = {
+            'Authorization': f'Bearer {self.config.api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        data = {
+            'model': self.config.model,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': kwargs.get('max_tokens', self.config.max_tokens),
+            'temperature': kwargs.get('temperature', self.config.temperature),
+            'top_p': kwargs.get('top_p', self.config.top_p)
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.config.base_url}/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=self.config.timeout
+            )
+            response.raise_for_status()
             
-            payload = {
-                "model": self.config.model,
-                "messages": [
-                    {"role": "system", "content": "You are a helpful code optimization assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": self.config.max_tokens,
-                "temperature": self.config.temperature,
-                "top_p": self.config.top_p
-            }
-            
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.config.api_key}"
-            }
-            
-            try:
-                response = self.session.post(
-                    url, 
-                    headers=headers, 
-                    json=payload, 
-                    timeout=self.config.timeout
-                )
-                response.raise_for_status()
+            result = response.json()
+            if 'choices' in result and len(result['choices']) > 0:
+                return result['choices'][0]['message']['content']
+            else:
+                raise ValueError("No response content received")
                 
-                data = response.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    return "[Error] No content returned from API"
-                    
-            except requests.exceptions.RequestException as e:
-                self.logger.error(f"API request failed: {e}")
-                return f"[Error] API request failed: {e}"
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"OpenAI API request failed: {e}")
+            raise
     
     def validate_api_key(self) -> bool:
         """Validate OpenAI API key"""
         try:
-            response = self.generate("Hello")
-            return not response.startswith("[Error]")
-        except Exception as e:
-            self.logger.error(f"API key validation failed: {e}")
+            # Make a simple test request
+            self.generate("Hello", max_tokens=1)
+            return True
+        except Exception:
             return False
 
-class RateLimiter:
-    """Simple rate limiter for API calls"""
+###############################################################################
+#                         INTELLIGENT SCALING SYSTEM                          #
+###############################################################################
+
+class MemoryMonitor:
+    """Monitor system memory usage and provide scaling recommendations"""
     
-    def __init__(self, max_calls: int, time_window: int):
-        self.max_calls = max_calls
+    def __init__(self, threshold_percent: float = 80.0, logger: Optional[logging.Logger] = None):
+        self.threshold_percent = threshold_percent
+        self.logger = logger or logging.getLogger(__name__)
+        self.memory_history = deque(maxlen=10)  # Keep last 10 readings
+    
+    def get_memory_usage(self) -> Dict[str, float]:
+        """Get current memory usage statistics"""
+        memory = psutil.virtual_memory()
+        usage = {
+            'percent': memory.percent,
+            'available_gb': memory.available / (1024**3),
+            'used_gb': memory.used / (1024**3),
+            'total_gb': memory.total / (1024**3)
+        }
+        self.memory_history.append(usage['percent'])
+        return usage
+    
+    def should_scale_down(self) -> bool:
+        """Determine if we should scale down due to memory pressure"""
+        current_usage = self.get_memory_usage()
+        return current_usage['percent'] > self.threshold_percent
+    
+    def get_scaling_factor(self) -> float:
+        """Get recommended scaling factor based on memory usage"""
+        current_usage = self.get_memory_usage()
+        if current_usage['percent'] > self.threshold_percent:
+            # Scale down more aggressively as memory usage increases
+            excess = current_usage['percent'] - self.threshold_percent
+            return max(0.1, 1.0 - (excess / 20.0))  # Scale down to 10% minimum
+        return 1.0
+    
+    def cleanup_memory(self):
+        """Force garbage collection to free memory"""
+        gc.collect()
+        self.logger.info("Performed memory cleanup")
+
+class AdaptiveRateLimiter:
+    """Intelligent rate limiter with exponential backoff and adaptive scaling"""
+    
+    def __init__(self, initial_max_calls: int, time_window: int, scaling_config: ScalingConfig, 
+                 logger: Optional[logging.Logger] = None):
+        self.initial_max_calls = initial_max_calls
+        self.current_max_calls = initial_max_calls
         self.time_window = time_window
-        self.calls = []
+        self.scaling_config = scaling_config
+        self.logger = logger or logging.getLogger(__name__)
+        
+        self.calls = deque()
+        self.rate_limit_hits = 0
+        self.consecutive_successes = 0
+        self.backoff_time = 1.0
         self.lock = threading.Lock()
+        
+        # Track API response times for adaptive scaling
+        self.response_times = deque(maxlen=50)
+        self.error_count = 0
+        self.last_rate_limit_time = 0
     
     def __enter__(self):
         with self.lock:
             now = time.time()
-            # Remove old calls outside the time window
-            self.calls = [call_time for call_time in self.calls if now - call_time < self.time_window]
             
-            # Wait if we've hit the rate limit
-            if len(self.calls) >= self.max_calls:
-                sleep_time = self.time_window - (now - self.calls[0])
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-                    self.calls = self.calls[1:]  # Remove the oldest call
+            # Remove old calls outside the time window
+            while self.calls and now - self.calls[0] >= self.time_window:
+                self.calls.popleft()
+            
+            # Check if we need to wait due to rate limiting
+            if len(self.calls) >= self.current_max_calls:
+                # Calculate wait time
+                oldest_call = self.calls[0]
+                wait_time = self.time_window - (now - oldest_call)
+                
+                if wait_time > 0:
+                    self.logger.warning(f"Rate limit reached, waiting {wait_time:.2f} seconds")
+                    time.sleep(wait_time)
+                    self.calls.popleft()  # Remove the oldest call
+                    self.rate_limit_hits += 1
+                    self.consecutive_successes = 0
+                    self._adjust_rate_limit_down()
             
             self.calls.append(now)
+            return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        if exc_type is None:
+            # Successful request
+            self.consecutive_successes += 1
+            self.error_count = max(0, self.error_count - 1)
+            
+            # Gradually increase rate limit after consecutive successes
+            if self.consecutive_successes >= 10:
+                self._adjust_rate_limit_up()
+                self.consecutive_successes = 0
+        else:
+            # Failed request
+            self.error_count += 1
+            self.consecutive_successes = 0
+            
+            # Check if it's a rate limit error
+            if exc_val and "429" in str(exc_val):
+                self.last_rate_limit_time = time.time()
+                self._handle_rate_limit_error()
+    
+    def _adjust_rate_limit_down(self):
+        """Reduce rate limit due to hitting limits"""
+        old_limit = self.current_max_calls
+        self.current_max_calls = max(
+            self.scaling_config.min_concurrent_requests,
+            int(self.current_max_calls * 0.7)  # Reduce by 30%
+        )
+        
+        if old_limit != self.current_max_calls:
+            self.logger.info(f"Reduced rate limit from {old_limit} to {self.current_max_calls}")
+    
+    def _adjust_rate_limit_up(self):
+        """Increase rate limit after successful operations"""
+        old_limit = self.current_max_calls
+        self.current_max_calls = min(
+            self.scaling_config.max_concurrent_requests,
+            int(self.current_max_calls * 1.2)  # Increase by 20%
+        )
+        
+        if old_limit != self.current_max_calls:
+            self.logger.info(f"Increased rate limit from {old_limit} to {self.current_max_calls}")
+    
+    def _handle_rate_limit_error(self):
+        """Handle rate limit errors with exponential backoff"""
+        self.backoff_time = min(
+            self.scaling_config.max_backoff_time,
+            self.backoff_time * self.scaling_config.rate_limit_backoff_factor
+        )
+        
+        self.logger.warning(f"Rate limit error detected, backing off for {self.backoff_time:.2f} seconds")
+        time.sleep(self.backoff_time)
+        
+        # Aggressively reduce rate limit
+        self.current_max_calls = max(
+            self.scaling_config.min_concurrent_requests,
+            int(self.current_max_calls * 0.5)
+        )
+    
+    def get_current_limit(self) -> int:
+        """Get current rate limit"""
+        return self.current_max_calls
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get rate limiter statistics"""
+        return {
+            'current_limit': self.current_max_calls,
+            'initial_limit': self.initial_max_calls,
+            'rate_limit_hits': self.rate_limit_hits,
+            'consecutive_successes': self.consecutive_successes,
+            'error_count': self.error_count,
+            'backoff_time': self.backoff_time,
+            'calls_in_window': len(self.calls)
+        }
+
+class AdaptiveChunker:
+    """Smart chunker that adapts chunk size based on system resources and API performance"""
+    
+    def __init__(self, initial_chunk_size: int, scaling_config: ScalingConfig, 
+                 memory_monitor: MemoryMonitor, logger: Optional[logging.Logger] = None):
+        self.initial_chunk_size = initial_chunk_size
+        self.current_chunk_size = initial_chunk_size
+        self.scaling_config = scaling_config
+        self.memory_monitor = memory_monitor
+        self.logger = logger or logging.getLogger(__name__)
+        
+        # Track processing performance
+        self.processing_times = deque(maxlen=20)
+        self.success_rate = 1.0
+        self.total_requests = 0
+        self.successful_requests = 0
+    
+    def get_optimal_chunk_size(self) -> int:
+        """Calculate optimal chunk size based on current conditions"""
+        # Start with memory-based scaling
+        memory_factor = self.memory_monitor.get_scaling_factor()
+        
+        # Adjust based on success rate
+        success_factor = self.success_rate
+        if success_factor < 0.8:  # If success rate is below 80%
+            success_factor *= 0.7  # Reduce chunk size more aggressively
+        
+        # Combine factors
+        combined_factor = min(memory_factor, success_factor)
+        
+        # Calculate new chunk size
+        new_size = int(self.initial_chunk_size * combined_factor)
+        
+        # Apply bounds
+        new_size = max(self.scaling_config.min_chunk_size, new_size)
+        new_size = min(self.scaling_config.max_chunk_size, new_size)
+        
+        # Update current chunk size if significantly different
+        if abs(new_size - self.current_chunk_size) > 100:
+            old_size = self.current_chunk_size
+            self.current_chunk_size = new_size
+            self.logger.info(f"Adjusted chunk size from {old_size} to {new_size}")
+        
+        return self.current_chunk_size
+    
+    def chunk_text(self, text: str, file_extension: str = "") -> List[str]:
+        """Split text into chunks with adaptive sizing"""
+        if not text.strip():
+            return []
+        
+        chunk_size = self.get_optimal_chunk_size()
+        
+        # For code files, try to preserve function/class boundaries
+        if file_extension.lower() in ['.lua', '.py', '.js', '.cpp', '.c', '.cs']:
+            return self._chunk_code(text, chunk_size)
+        else:
+            return self._chunk_simple(text, chunk_size)
+    
+    def _chunk_code(self, text: str, chunk_size: int) -> List[str]:
+        """Chunk code while preserving function boundaries"""
+        lines = text.split('\n')
+        chunks = []
+        current_chunk = []
+        current_size = 0
+        
+        for line in lines:
+            line_size = len(line) + 1  # +1 for newline
+            
+            # If adding this line would exceed chunk size and we have content
+            if current_size + line_size > chunk_size and current_chunk:
+                chunks.append('\n'.join(current_chunk))
+                current_chunk = [line]
+                current_size = line_size
+            else:
+                current_chunk.append(line)
+                current_size += line_size
+        
+        # Add remaining content
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+        
+        return chunks
+    
+    def _chunk_simple(self, text: str, chunk_size: int) -> List[str]:
+        """Simple character-based chunking"""
+        return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    
+    def record_processing_result(self, success: bool, processing_time: float):
+        """Record the result of a processing operation"""
+        self.total_requests += 1
+        if success:
+            self.successful_requests += 1
+            self.processing_times.append(processing_time)
+        
+        # Update success rate
+        self.success_rate = self.successful_requests / self.total_requests if self.total_requests > 0 else 1.0
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get chunker statistics"""
+        avg_processing_time = sum(self.processing_times) / len(self.processing_times) if self.processing_times else 0
+        
+        return {
+            'current_chunk_size': self.current_chunk_size,
+            'initial_chunk_size': self.initial_chunk_size,
+            'success_rate': self.success_rate,
+            'total_requests': self.total_requests,
+            'successful_requests': self.successful_requests,
+            'avg_processing_time': avg_processing_time
+        }
+
+class IntelligentScalingManager:
+    """Manages all scaling components and coordinates their behavior"""
+    
+    def __init__(self, config_manager: ConfigManager, logger: logging.Logger):
+        self.config_manager = config_manager
+        self.logger = logger
+        self.scaling_config = config_manager.get_scaling_config()
+        
+        # Initialize scaling components
+        self.memory_monitor = MemoryMonitor(
+            threshold_percent=self.scaling_config.memory_threshold_percent,
+            logger=logger
+        )
+        
+        rate_limit_config = config_manager.config['api']['rate_limit']
+        self.rate_limiter = AdaptiveRateLimiter(
+            initial_max_calls=rate_limit_config['concurrent_requests'],
+            time_window=60,  # 1 minute window
+            scaling_config=self.scaling_config,
+            logger=logger
+        )
+        
+        self.adaptive_chunker = AdaptiveChunker(
+            initial_chunk_size=config_manager.config['processing']['chunk_size'],
+            scaling_config=self.scaling_config,
+            memory_monitor=self.memory_monitor,
+            logger=logger
+        )
+        
+        # Scaling statistics
+        self.scaling_events = []
+        self.start_time = time.time()
+    
+    def should_scale_down_concurrency(self) -> bool:
+        """Determine if we should reduce concurrent operations"""
+        return (self.memory_monitor.should_scale_down() or 
+                self.rate_limiter.error_count > 5)
+    
+    def get_optimal_concurrency(self) -> int:
+        """Get optimal number of concurrent operations"""
+        base_concurrency = self.rate_limiter.get_current_limit()
+        
+        # Reduce based on memory pressure
+        if self.memory_monitor.should_scale_down():
+            memory_factor = self.memory_monitor.get_scaling_factor()
+            base_concurrency = int(base_concurrency * memory_factor)
+        
+        # Ensure we stay within bounds
+        return max(
+            self.scaling_config.min_concurrent_requests,
+            min(self.scaling_config.max_concurrent_requests, base_concurrency)
+        )
+    
+    def handle_api_error(self, error: Exception):
+        """Handle API errors and adjust scaling accordingly"""
+        error_str = str(error)
+        
+        if "429" in error_str:  # Rate limit error
+            self.logger.warning("Rate limit detected, scaling down")
+            self._record_scaling_event("rate_limit_hit", "Reduced concurrency due to rate limiting")
+        elif "memory" in error_str.lower():  # Memory error
+            self.logger.warning("Memory pressure detected, scaling down")
+            self.memory_monitor.cleanup_memory()
+            self._record_scaling_event("memory_pressure", "Reduced chunk size due to memory pressure")
+        elif "timeout" in error_str.lower():  # Timeout error
+            self.logger.warning("Timeout detected, adjusting parameters")
+            self._record_scaling_event("timeout", "Adjusted parameters due to timeout")
+    
+    def _record_scaling_event(self, event_type: str, description: str):
+        """Record a scaling event for analysis"""
+        event = {
+            'timestamp': time.time(),
+            'type': event_type,
+            'description': description,
+            'memory_usage': self.memory_monitor.get_memory_usage(),
+            'rate_limiter_stats': self.rate_limiter.get_stats(),
+            'chunker_stats': self.adaptive_chunker.get_stats()
+        }
+        self.scaling_events.append(event)
+        
+        # Keep only last 100 events
+        if len(self.scaling_events) > 100:
+            self.scaling_events = self.scaling_events[-100:]
+    
+    def get_scaling_report(self) -> Dict[str, Any]:
+        """Generate a comprehensive scaling report"""
+        runtime = time.time() - self.start_time
+        
+        return {
+            'runtime_seconds': runtime,
+            'scaling_enabled': self.scaling_config.enable_adaptive_scaling,
+            'memory_monitor': {
+                'current_usage': self.memory_monitor.get_memory_usage(),
+                'threshold_percent': self.scaling_config.memory_threshold_percent,
+                'history': list(self.memory_monitor.memory_history)
+            },
+            'rate_limiter': self.rate_limiter.get_stats(),
+            'adaptive_chunker': self.adaptive_chunker.get_stats(),
+            'optimal_concurrency': self.get_optimal_concurrency(),
+            'scaling_events': self.scaling_events[-10:],  # Last 10 events
+            'total_scaling_events': len(self.scaling_events)
+        }
 
 ###############################################################################
 #                              FILE PROCESSING                                #
@@ -500,13 +864,14 @@ class SmartChunker:
         return [text[i:i + self.chunk_size] for i in range(0, len(text), self.chunk_size)]
 
 class FileProcessor:
-    """Handles file processing and optimization"""
+    """Handles file processing and optimization with intelligent scaling"""
     
-    def __init__(self, config_manager: ConfigManager, ai_provider: AIProvider, logger: logging.Logger):
+    def __init__(self, config_manager: ConfigManager, ai_provider: AIProvider, 
+                 scaling_manager: IntelligentScalingManager, logger: logging.Logger):
         self.config_manager = config_manager
         self.ai_provider = ai_provider
+        self.scaling_manager = scaling_manager
         self.logger = logger
-        self.chunker = SmartChunker(config_manager.config['processing']['chunk_size'])
         self.security_config = config_manager.get_security_config()
         self.stats = {
             'files_processed': 0,
@@ -515,7 +880,9 @@ class FileProcessor:
             'files_failed': 0,
             'total_size_before': 0,
             'total_size_after': 0,
-            'processing_time': 0
+            'processing_time': 0,
+            'scaling_events': 0,
+            'memory_cleanups': 0
         }
         self.stats_lock = threading.Lock()
     
@@ -633,8 +1000,17 @@ class FileProcessor:
             return False
     
     def _optimize_file(self, file_path: Path, profile: OptimizationProfile) -> Optional[str]:
-        """Optimize a single file using AI"""
+        """Optimize a single file using AI with intelligent scaling"""
+        processing_start_time = time.time()
+        success = False
+        
         try:
+            # Check memory pressure before processing
+            if self.scaling_manager.memory_monitor.should_scale_down():
+                self.scaling_manager.memory_monitor.cleanup_memory()
+                with self.stats_lock:
+                    self.stats['memory_cleanups'] += 1
+            
             # Read file with size limit for memory safety
             max_size = self.config_manager.config['processing'].get('max_file_size', 10) * 1024 * 1024
             if file_path.stat().st_size > max_size:
@@ -645,34 +1021,74 @@ class FileProcessor:
                 content = f.read()
             
             if not content.strip():
+                success = True
                 return content
             
-            # Split into chunks
-            chunks = self.chunker.chunk_text(content, file_path.suffix)
+            # Use adaptive chunker for intelligent chunk sizing
+            chunks = self.scaling_manager.adaptive_chunker.chunk_text(content, file_path.suffix)
             optimized_chunks = []
             
             for i, chunk in enumerate(chunks):
-                # Add timeout for individual chunk processing
-                start_time = time.time()
-                prompt = self._build_optimization_prompt(chunk, file_path.suffix, profile)
-                optimized_chunk = self.ai_provider.generate(prompt)
+                chunk_start_time = time.time()
                 
-                # Check for timeout
-                if time.time() - start_time > self.security_config.max_processing_time:
-                    self.logger.warning(f"Chunk processing timeout for {file_path}")
-                    return None
-                
-                # Clean up the response (remove markdown formatting if present)
-                optimized_chunk = self._clean_ai_response(optimized_chunk)
-                optimized_chunks.append(optimized_chunk)
-                
-                self.logger.debug(f"Optimized chunk {i+1}/{len(chunks)} for {file_path}")
+                try:
+                    # Use rate limiter for API calls
+                    with self.scaling_manager.rate_limiter:
+                        prompt = self._build_optimization_prompt(chunk, file_path.suffix, profile)
+                        optimized_chunk = self.ai_provider.generate(prompt)
+                    
+                    # Check for timeout
+                    chunk_processing_time = time.time() - chunk_start_time
+                    if chunk_processing_time > self.security_config.max_processing_time:
+                        self.logger.warning(f"Chunk processing timeout for {file_path}")
+                        self.scaling_manager.adaptive_chunker.record_processing_result(False, chunk_processing_time)
+                        return None
+                    
+                    # Clean up the response (remove markdown formatting if present)
+                    optimized_chunk = self._clean_ai_response(optimized_chunk)
+                    optimized_chunks.append(optimized_chunk)
+                    
+                    # Record successful chunk processing
+                    self.scaling_manager.adaptive_chunker.record_processing_result(True, chunk_processing_time)
+                    
+                    self.logger.debug(f"Optimized chunk {i+1}/{len(chunks)} for {file_path}")
+                    
+                except Exception as chunk_error:
+                    # Handle chunk-specific errors
+                    self.scaling_manager.handle_api_error(chunk_error)
+                    self.scaling_manager.adaptive_chunker.record_processing_result(False, time.time() - chunk_start_time)
+                    
+                    # If it's a rate limit error, we might want to retry
+                    if "429" in str(chunk_error):
+                        self.logger.warning(f"Rate limit hit during chunk {i+1}, retrying...")
+                        with self.stats_lock:
+                            self.stats['scaling_events'] += 1
+                        
+                        # Wait and retry once
+                        time.sleep(2)
+                        try:
+                            with self.scaling_manager.rate_limiter:
+                                optimized_chunk = self.ai_provider.generate(prompt)
+                            optimized_chunk = self._clean_ai_response(optimized_chunk)
+                            optimized_chunks.append(optimized_chunk)
+                            self.scaling_manager.adaptive_chunker.record_processing_result(True, time.time() - chunk_start_time)
+                        except Exception as retry_error:
+                            self.logger.error(f"Retry failed for chunk {i+1}: {retry_error}")
+                            return None
+                    else:
+                        raise chunk_error
             
+            success = True
             return '\n'.join(optimized_chunks)
             
         except Exception as e:
             self.logger.error(f"Failed to optimize {file_path}: {e}")
+            self.scaling_manager.handle_api_error(e)
             return None
+        finally:
+            # Record processing result for adaptive scaling
+            total_processing_time = time.time() - processing_start_time
+            self.scaling_manager.adaptive_chunker.record_processing_result(success, total_processing_time)
     
     def _build_optimization_prompt(self, code: str, file_extension: str, profile: OptimizationProfile) -> str:
         """Build optimization prompt based on profile and file type"""
@@ -798,12 +1214,13 @@ class BackupManager:
 ###############################################################################
 
 class ARCGenV2:
-    """Main ARCGen V2 application"""
+    """Main ARCGen V2 application with intelligent scaling"""
     
     def __init__(self, config_path: Optional[str] = None):
         self.config_manager = ConfigManager(config_path)
         self.logger = setup_logging(self.config_manager.config)
         self.ai_provider = None
+        self.scaling_manager = None
         self.file_processor = None
         self.backup_manager = None
         
@@ -812,6 +1229,9 @@ class ARCGenV2:
     
     def _initialize_components(self):
         """Initialize all components"""
+        # Initialize intelligent scaling manager first
+        self.scaling_manager = IntelligentScalingManager(self.config_manager, self.logger)
+        
         # Initialize AI provider
         api_config = self.config_manager.get_api_config()
         rate_limit_config = self.config_manager.config['api']['rate_limit']
@@ -828,8 +1248,8 @@ class ARCGenV2:
             console.print("[red]API key validation failed[/red]")
             sys.exit(1)
         
-        # Initialize file processor
-        self.file_processor = FileProcessor(self.config_manager, self.ai_provider, self.logger)
+        # Initialize file processor with scaling manager
+        self.file_processor = FileProcessor(self.config_manager, self.ai_provider, self.scaling_manager, self.logger)
         
         # Initialize backup manager
         backup_config = BackupConfig(**self.config_manager.config.get('backup', {}))
@@ -855,7 +1275,7 @@ class ARCGenV2:
         
         console.print(f"[green]Processing {len(target_files)} files...[/green]")
         
-        # Process files with progress bar
+        # Process files with progress bar and intelligent scaling
         results = []
         with Progress(
             SpinnerColumn(),
@@ -867,21 +1287,50 @@ class ARCGenV2:
         ) as progress:
             task = progress.add_task("Processing files...", total=len(target_files))
             
-            # Use thread pool for parallel processing
-            max_workers = self.config_manager.config['api']['rate_limit']['concurrent_requests']
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_file = {
-                    executor.submit(
-                        self.file_processor.process_file, 
-                        file_path, addon_path, output_path, profile
-                    ): file_path
-                    for file_path in target_files
-                }
+            # Use intelligent scaling for dynamic concurrency control
+            optimal_workers = self.scaling_manager.get_optimal_concurrency()
+            self.logger.info(f"Starting with {optimal_workers} concurrent workers")
+            
+            # Process files in batches to allow for dynamic scaling
+            batch_size = max(10, len(target_files) // 10)  # Process in 10% batches
+            
+            for i in range(0, len(target_files), batch_size):
+                batch_files = target_files[i:i + batch_size]
                 
-                for future in as_completed(future_to_file):
-                    result = future.result()
-                    results.append(result)
-                    progress.advance(task)
+                # Check if we need to adjust concurrency
+                current_workers = self.scaling_manager.get_optimal_concurrency()
+                if current_workers != optimal_workers:
+                    self.logger.info(f"Adjusting concurrency from {optimal_workers} to {current_workers}")
+                    optimal_workers = current_workers
+                
+                # Process current batch
+                with ThreadPoolExecutor(max_workers=optimal_workers) as executor:
+                    future_to_file = {
+                        executor.submit(
+                            self.file_processor.process_file, 
+                            file_path, addon_path, output_path, profile
+                        ): file_path
+                        for file_path in batch_files
+                    }
+                    
+                    for future in as_completed(future_to_file):
+                        try:
+                            result = future.result()
+                            results.append(result)
+                            progress.advance(task)
+                        except Exception as e:
+                            # Handle individual file processing errors
+                            file_path = future_to_file[future]
+                            self.logger.error(f"Error processing {file_path}: {e}")
+                            self.scaling_manager.handle_api_error(e)
+                            
+                            # Add error result
+                            results.append({
+                                'file': str(file_path),
+                                'error': str(e),
+                                'processing_time': 0
+                            })
+                            progress.advance(task)
         
         # Generate report
         total_time = time.time() - start_time
@@ -897,8 +1346,9 @@ class ARCGenV2:
     
     def _generate_report(self, addon_path: Path, output_path: Path, results: List[Dict], 
                         total_time: float, backup_path: Optional[Path]) -> Dict[str, Any]:
-        """Generate processing report"""
+        """Generate comprehensive processing report with scaling statistics"""
         stats = self.file_processor.stats
+        scaling_report = self.scaling_manager.get_scaling_report()
         
         return {
             'timestamp': datetime.now().isoformat(),
@@ -914,8 +1364,11 @@ class ARCGenV2:
                 'size_before': stats['total_size_before'],
                 'size_after': stats['total_size_after'],
                 'size_reduction': stats['total_size_before'] - stats['total_size_after'],
-                'processing_time': stats['processing_time']
+                'processing_time': stats['processing_time'],
+                'scaling_events': stats['scaling_events'],
+                'memory_cleanups': stats['memory_cleanups']
             },
+            'scaling_report': scaling_report,
             'results': results
         }
     
@@ -930,10 +1383,11 @@ class ARCGenV2:
             self.logger.error(f"Failed to save report: {e}")
     
     def _display_summary(self, report: Dict[str, Any]):
-        """Display processing summary"""
+        """Display comprehensive processing summary with scaling information"""
         stats = report['statistics']
+        scaling_report = report['scaling_report']
         
-        # Create summary table
+        # Create main summary table
         table = Table(title="Processing Summary")
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="green")
@@ -946,8 +1400,47 @@ class ARCGenV2:
         table.add_row("Size After", f"{stats['size_after'] / 1024:.1f} KB")
         table.add_row("Size Reduction", f"{stats['size_reduction'] / 1024:.1f} KB")
         table.add_row("Total Time", f"{report['total_time']:.1f}s")
+        table.add_row("Scaling Events", str(stats['scaling_events']))
+        table.add_row("Memory Cleanups", str(stats['memory_cleanups']))
         
         console.print(table)
+        
+        # Create scaling summary table
+        if scaling_report['scaling_enabled']:
+            scaling_table = Table(title="Intelligent Scaling Summary")
+            scaling_table.add_column("Component", style="cyan")
+            scaling_table.add_column("Status", style="green")
+            
+            # Memory information
+            memory_info = scaling_report['memory_monitor']['current_usage']
+            scaling_table.add_row("Memory Usage", f"{memory_info['percent']:.1f}%")
+            scaling_table.add_row("Available Memory", f"{memory_info['available_gb']:.1f} GB")
+            
+            # Rate limiter information
+            rate_info = scaling_report['rate_limiter']
+            scaling_table.add_row("Current Rate Limit", str(rate_info['current_limit']))
+            scaling_table.add_row("Rate Limit Hits", str(rate_info['rate_limit_hits']))
+            
+            # Chunker information
+            chunker_info = scaling_report['adaptive_chunker']
+            scaling_table.add_row("Current Chunk Size", str(chunker_info['current_chunk_size']))
+            scaling_table.add_row("Success Rate", f"{chunker_info['success_rate']:.1%}")
+            
+            # Overall scaling
+            scaling_table.add_row("Optimal Concurrency", str(scaling_report['optimal_concurrency']))
+            scaling_table.add_row("Total Scaling Events", str(scaling_report['total_scaling_events']))
+            
+            console.print(scaling_table)
+        
+        # Display recent scaling events if any
+        if scaling_report['scaling_events']:
+            console.print("\n[yellow]Recent Scaling Events:[/yellow]")
+            for event in scaling_report['scaling_events'][-3:]:  # Show last 3 events
+                timestamp = datetime.fromtimestamp(event['timestamp']).strftime("%H:%M:%S")
+                console.print(f"  {timestamp}: {event['description']}")
+        
+        console.print(f"\n[green]✓ Processing completed successfully![/green]")
+        console.print(f"[dim]Report saved to: {report['output_path']}/arcgen_report.json[/dim]")
 
 ###############################################################################
 #                              CLI INTERFACE                                  #

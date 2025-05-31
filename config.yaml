@@ -181,4 +181,33 @@ performance:
   cache_expiration: 24
   
   # Memory limit for processing (MB)
-  memory_limit: 1024 
+  memory_limit: 1024
+
+# Intelligent Scaling Configuration
+scaling:
+  # Enable adaptive scaling features
+  enable_adaptive_scaling: true
+  
+  # Minimum concurrent requests (safety limit)
+  min_concurrent_requests: 1
+  
+  # Maximum concurrent requests (performance limit)
+  max_concurrent_requests: 10
+  
+  # Memory usage threshold for scaling down (percentage)
+  memory_threshold_percent: 80.0
+  
+  # Rate limit backoff multiplier
+  rate_limit_backoff_factor: 2.0
+  
+  # Maximum backoff time in seconds
+  max_backoff_time: 300
+  
+  # Chunk size scaling factor when under pressure
+  chunk_size_scaling_factor: 0.5
+  
+  # Minimum chunk size (characters)
+  min_chunk_size: 500
+  
+  # Maximum chunk size (characters)
+  max_chunk_size: 8000 

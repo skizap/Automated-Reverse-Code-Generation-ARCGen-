@@ -236,6 +236,61 @@ Rich console output provides:
 - Processing statistics table
 - Error and warning highlights
 
+## 🚀 Intelligent Scaling System
+
+ARCGen V2 features an advanced intelligent scaling system that automatically adapts to various constraints and optimizes performance in real-time.
+
+### Adaptive Rate Limiting
+- **Exponential Backoff**: Automatically handles rate limit errors with intelligent backoff strategies
+- **Dynamic Adjustment**: Increases or decreases request rates based on API response patterns
+- **Concurrent Request Optimization**: Dynamically adjusts the number of concurrent requests
+- **Success Rate Monitoring**: Tracks API success rates and adjusts accordingly
+
+### Memory Management
+- **Real-time Monitoring**: Continuously monitors system memory usage
+- **Automatic Cleanup**: Triggers garbage collection when memory pressure is detected
+- **Adaptive Scaling**: Reduces processing intensity when memory usage exceeds thresholds
+- **Memory-based Concurrency**: Adjusts concurrent operations based on available memory
+
+### Adaptive Chunking
+- **Dynamic Chunk Sizing**: Automatically adjusts chunk sizes based on system performance
+- **Success Rate Optimization**: Reduces chunk sizes when processing failures occur
+- **Memory-aware Chunking**: Considers memory usage when determining optimal chunk sizes
+- **Performance Tracking**: Monitors processing times to optimize chunk sizes
+
+### Intelligent Concurrency Control
+- **Dynamic Worker Adjustment**: Automatically scales the number of worker threads
+- **Resource-based Scaling**: Considers both memory and API limits when determining concurrency
+- **Batch Processing**: Processes files in batches to allow for dynamic scaling adjustments
+- **Error Recovery**: Automatically reduces concurrency when errors are detected
+
+### Scaling Configuration
+```yaml
+scaling:
+  enable_adaptive_scaling: true
+  min_concurrent_requests: 1
+  max_concurrent_requests: 10
+  memory_threshold_percent: 80.0
+  rate_limit_backoff_factor: 2.0
+  max_backoff_time: 300
+  chunk_size_scaling_factor: 0.5
+  min_chunk_size: 500
+  max_chunk_size: 8000
+```
+
+### Scaling Demo
+Test the intelligent scaling system:
+```bash
+# Demonstrate rate limiting adaptation
+python scaling_demo.py --scenario rate_limit --duration 30
+
+# Demonstrate memory pressure handling
+python scaling_demo.py --scenario memory_pressure --duration 20
+
+# Demonstrate mixed scenarios (default)
+python scaling_demo.py --scenario mixed --duration 60
+```
+
 ## 🔒 Security Features
 
 ### Path Validation
@@ -249,14 +304,16 @@ Rich console output provides:
 - Flags dangerous operations
 
 ### Rate Limiting
-- Built-in API rate limiting
-- Configurable request throttling
+- Built-in API rate limiting with intelligent scaling
+- Configurable request throttling with adaptive adjustment
 - Prevents API abuse and quota exhaustion
+- Automatic recovery from rate limit errors
 
 ### Audit Trail
 - Complete processing logs
 - Detailed error reporting
 - Backup creation tracking
+- Scaling event monitoring
 
 ## 🧪 Testing
 
@@ -338,13 +395,13 @@ Error: DEEPSEEK_API_KEY environment variable not set
 ```
 Error: API request failed: 429 Too Many Requests
 ```
-**Solution**: Reduce `concurrent_requests` in config or wait before retrying.
+**Solution**: The intelligent scaling system now automatically handles rate limiting with exponential backoff and adaptive concurrency control. No manual intervention required.
 
 #### Memory Issues
 ```
 Error: Memory limit exceeded
 ```
-**Solution**: Increase `memory_limit` in config or process smaller files.
+**Solution**: The intelligent scaling system automatically monitors memory usage and scales down operations when memory pressure is detected. It also performs automatic memory cleanup.
 
 #### File Processing Errors
 ```
